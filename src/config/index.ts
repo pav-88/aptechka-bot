@@ -6,6 +6,7 @@ dotenv.config();
 const envSchema = z.object({
   BOT_TOKEN: z.string().min(1, 'BOT_TOKEN is required'),
   DATABASE_URL: z.string().default('file:./dev.db'),
+  DATABASE_PROVIDER: z.enum(['sqlite', 'postgresql']).optional().default('sqlite'),
   DEEPSEEK_API_KEY: z.string().optional(),
   LOG_LEVEL: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional().default('INFO'),
 });
@@ -23,6 +24,7 @@ if (!parsed.success) {
 export const config = {
   botToken: parsed.data.BOT_TOKEN,
   databaseUrl: parsed.data.DATABASE_URL,
+  databaseProvider: parsed.data.DATABASE_PROVIDER,
   deepseekApiKey: parsed.data.DEEPSEEK_API_KEY || '',
   logLevel: parsed.data.LOG_LEVEL,
 } as const;
