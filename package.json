@@ -29,13 +29,13 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^6.19.3",
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.4.5",
     "grammy": "^1.35.6",
     "node-cron": "^3.0.3",
     "openai": "^7.3.0",
-    "prisma": "^5.22.0",
+    "prisma": "^6.19.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {
