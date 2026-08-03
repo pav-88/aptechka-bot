@@ -2,7 +2,6 @@ import { Composer, InlineKeyboard } from 'grammy';
 import type { BotContext } from '../../shared/types';
 import { prisma } from '../../shared/database';
 import { getMedicineDescription } from '../../shared/ai';
-import { logger } from '../../shared/logger';
 
 const PAGE_SIZE = 5;
 
@@ -11,67 +10,6 @@ export const medicinesComposer = new Composer<BotContext>();
 medicinesComposer.hears('💊 Справочник лекарств', async (ctx) => {
   await ctx.reply('Введите название лекарства для поиска:');
   ctx.session.awaitingInput = 'search_medicine';
-});
-
-medicinesComposer.on('message:text', async (ctx, next) => {
-  if (ctx.session.awaitingInput !== 'search_medicine') {
-    await next();
-    return;
-  }
-
-  const query = ctx.message.text.trim();
-  if (!query) return;
-
-  const medicines = await prisma.medicine.findMany({
-    where: { name: { contains: query } },
-    orderBy: { name: 'asc' },
-  });
-
-  if (medicines.length > 0) {
-    await sendMedicinePage(ctx, query, 0);
-    return;
-  }
-
-  const tokens = query.toLowerCase().split(/\s+/);
-  const all = await prisma.medicine.findMany({ orderBy: { name: 'asc' } });
-  const scored = all.map(m => {
-    const name = m.name.toLowerCase();
-    let score = 0;
-    for (const t of tokens) {
-      if (name.includes(t)) score += 10;
-      if (name.startsWith(t)) score += 5;
-      if (m.activeIngredient?.toLowerCase().includes(t)) score += 3;
-      if (m.category?.toLowerCase().includes(t)) score += 1;
-    }
-    return { medicine: m, score };
-  }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
-
-  if (scored.length === 0) {
-    await ctx.reply('💊 Лекарство не найдено. Попробуйте другое название.');
-    ctx.session.awaitingInput = 'search_medicine';
-    return;
-  }
-
-  ctx.session.awaitingInput = undefined;
-  ctx.session.tempData = undefined;
-
-  for (const { medicine: m } of scored.slice(0, PAGE_SIZE)) {
-    let text = `💊 *${m.name}*`;
-    if (m.dosage) text += `\n💉 *Дозировка:* ${m.dosage}`;
-    if (m.category) text += `\n📂 *Категория:* ${m.category}`;
-    if (m.activeIngredient) text += `\n🧪 *Действующее вещество:* ${m.activeIngredient}`;
-
-    const telegramId = String(ctx.from?.id);
-    const analogues = await findAnaloguesInMyKit(telegramId, m.activeIngredient || '');
-    if (analogues.length > 0) {
-      text += `\n\n✅ *В вашей аптечке:* ${analogues.join(', ')}`;
-    }
-
-    const kb = new InlineKeyboard().text('ℹ️ Инструкция', `medicine_info:${m.name}`);
-    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
-  }
-
-  await ctx.reply('Чтобы узнать подробнее — нажмите "ℹ️ Инструкция" под любым препаратом.');
 });
 
 async function findAnaloguesInMyKit(telegramId: string, activeIngredient: string): Promise<string[]> {
@@ -95,6 +33,78 @@ async function findAnaloguesInMyKit(telegramId: string, activeIngredient: string
   }
 }
 
+async function renderMedicines(ctx: BotContext, medicines: { name: string; dosage: string | null; category: string | null; activeIngredient: string | null }[]): Promise<void> {
+  const telegramId = String(ctx.from?.id);
+
+  for (const m of medicines) {
+    let text = `💊 *${m.name}*`;
+    if (m.dosage) text += `\n💉 *Дозировка:* ${m.dosage}`;
+    if (m.category) text += `\n📂 *Категория:* ${m.category}`;
+    if (m.activeIngredient) text += `\n🧪 *Действующее вещество:* ${m.activeIngredient}`;
+
+    const analogues = await findAnaloguesInMyKit(telegramId, m.activeIngredient || '');
+    if (analogues.length > 0) {
+      text += `\n\n✅ *В вашей аптечке:* ${analogues.join(', ')}`;
+    }
+
+    const kb = new InlineKeyboard().text('ℹ️ Инструкция', `medicine_info:${m.name}`);
+    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+  }
+}
+
+async function fuzzySearch(prefix: string) {
+  const tokens = prefix.toLowerCase().split(/\s+/);
+  const all = await prisma.medicine.findMany({ orderBy: { name: 'asc' } });
+  return all.map(m => {
+    const name = m.name.toLowerCase();
+    let score = 0;
+    for (const t of tokens) {
+      if (name.includes(t)) score += 10;
+      if (name.startsWith(t)) score += 5;
+      if (m.activeIngredient?.toLowerCase().includes(t)) score += 3;
+    }
+    return { medicine: m, score };
+  }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+}
+
+export async function handleSearchMedicine(ctx: BotContext): Promise<boolean> {
+  const query = ctx.message?.text?.trim();
+  if (!query) return false;
+
+  const exact = await prisma.medicine.findMany({
+    where: { name: { contains: query } },
+    orderBy: { name: 'asc' },
+  });
+
+  if (exact.length > 0) {
+    ctx.session.awaitingInput = undefined;
+    ctx.session.tempData = undefined;
+    await renderMedicines(ctx, exact.slice(0, PAGE_SIZE));
+
+    const total = exact.length;
+    if (total > PAGE_SIZE) {
+      const kb = new InlineKeyboard().text(`➡️ Ещё (${PAGE_SIZE}/${total})`, `search_more:${query}:${PAGE_SIZE}`);
+      await ctx.reply('Показать ещё?', { reply_markup: kb });
+    } else {
+      await ctx.reply('Чтобы узнать подробнее — нажмите "ℹ️ Инструкция" под любым препаратом.');
+    }
+    return true;
+  }
+
+  const fuzzy = await fuzzySearch(query);
+
+  if (fuzzy.length === 0) {
+    await ctx.reply('💊 Лекарство не найдено. Попробуйте другое название.');
+    return false;
+  }
+
+  ctx.session.awaitingInput = undefined;
+  ctx.session.tempData = undefined;
+  await renderMedicines(ctx, fuzzy.slice(0, PAGE_SIZE).map(x => x.medicine));
+  await ctx.reply('Чтобы узнать подробнее — нажмите "ℹ️ Инструкция" под любым препаратом.');
+  return true;
+}
+
 export async function sendMedicinePage(ctx: BotContext, query: string, offset: number): Promise<void> {
   const medicines = await prisma.medicine.findMany({
     where: { name: { contains: query } },
@@ -110,23 +120,8 @@ export async function sendMedicinePage(ctx: BotContext, query: string, offset: n
 
   const total = await prisma.medicine.count({ where: { name: { contains: query } } });
   const hasMore = offset + PAGE_SIZE < total;
-  const telegramId = String(ctx.from?.id);
 
-  for (const m of medicines) {
-    let text = `💊 *${m.name}*`;
-    if (m.dosage) text += `\n💉 *Дозировка:* ${m.dosage}`;
-    if (m.category) text += `\n📂 *Категория:* ${m.category}`;
-    if (m.activeIngredient) text += `\n🧪 *Действующее вещество:* ${m.activeIngredient}`;
-
-    const analogues = await findAnaloguesInMyKit(telegramId, m.activeIngredient || '');
-    if (analogues.length > 0) {
-      text += `\n\n✅ *В вашей аптечке:* ${analogues.join(', ')}`;
-    }
-
-    const kb = new InlineKeyboard().text('ℹ️ Инструкция', `medicine_info:${m.name}`);
-
-    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
-  }
+  await renderMedicines(ctx, medicines);
 
   if (hasMore) {
     const kb = new InlineKeyboard().text(`➡️ Ещё (${Math.min(offset + PAGE_SIZE, total)}/${total})`, `search_more:${query}:${offset + PAGE_SIZE}`);
