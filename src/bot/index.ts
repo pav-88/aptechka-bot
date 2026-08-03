@@ -1,4 +1,4 @@
-import { Bot, session } from 'grammy';
+import { Bot, session, ApiClientOptions } from 'grammy';
 import type { BotContext, SessionData } from '../shared/types';
 import { config } from '../config';
 import { connectDatabase, disconnectDatabase } from '../shared/database';
@@ -115,9 +115,30 @@ export async function createBot(): Promise<Bot<BotContext>> {
   return bot;
 }
 
+async function checkTelegramApi(): Promise<void> {
+  const url = 'https://api.telegram.org/bot' + config.botToken.split(':')[0] + '/getMe';
+  logger.info('Bot', 'Checking Telegram API connectivity...', { url: url.substring(0, 50) + '...' });
+
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    const text = await res.text();
+    logger.info('Bot', `Telegram API connectivity check: ${res.status} ${res.statusText}`, { body: text.substring(0, 200) });
+  } catch (err) {
+    clearTimeout(id);
+    logger.error('Bot', 'Telegram API is NOT reachable', { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export async function startBot(): Promise<void> {
   try {
     const bot = await createBot();
+
+    await checkTelegramApi();
+
     logger.info('Bot', 'Calling bot.start() — connecting to Telegram API...');
 
     const startPromise = bot.start({
