@@ -16,7 +16,7 @@ export async function handleAwaitingInput(ctx: BotContext): Promise<void> {
   if (mode === 'search_medicine') {
     const total = await prisma.medicine.count({ where: { name: { contains: text } } });
     if (total === 0) {
-      await ctx.reply('💊 Лекарство не найдено. Попробуйте другое название.');
+      await ctx.reply(`💊 *${text}* не найдено в справочнике. Лекарство есть в вашей аптечке?`);
       ctx.session.awaitingInput = undefined;
       return;
     }

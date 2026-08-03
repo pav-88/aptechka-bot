@@ -10,7 +10,7 @@ import { startReminderChecker } from '../shared/reminder-checker';
 import { prismaSessionAdapter } from '../shared/session-adapter';
 import { logger } from '../shared/logger';
 
-import { medicinesComposer } from '../features/medicines';
+import { seedMedicineCatalog } from '../shared/seed';import { medicinesComposer } from '../features/medicines';
 import { mykitComposer } from '../features/mykit';
 import { firstaidComposer } from '../features/firstaid';
 import { remindersComposer } from '../features/reminders';
@@ -71,6 +71,8 @@ export async function createBot(): Promise<Bot<BotContext>> {
   }
 
   await connectDatabase();
+
+  await seedMedicineCatalog();
 
   const bot = new Bot<BotContext>(config.botToken);
 
