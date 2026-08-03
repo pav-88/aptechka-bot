@@ -4,6 +4,7 @@ dotenv.config();
 export const config = {
   botToken: process.env.BOT_TOKEN || '',
   databaseUrl: process.env.DATABASE_URL || 'file:./dev.db',
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
 } as const;
 
 if (!config.botToken) {
