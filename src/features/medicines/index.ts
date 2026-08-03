@@ -5,6 +5,74 @@ import { getMedicineDescription } from '../../shared/ai';
 
 const PAGE_SIZE = 5;
 
+const CYRILLIC_ALIKE: Record<string, string> = {
+  а: 'ао',
+  о: 'ао',
+  е: 'еиэ',
+  и: 'еи',
+  э: 'еэ',
+  ы: 'ыи',
+  у: 'у',
+  ю: 'у',
+};
+
+function normalizeFuzzy(word: string): string {
+  return word.toLowerCase().replace(/ё/g, 'е').replace(/ъ/g, 'ь');
+}
+
+function cjkSimilarity(a_: string, b_: string): number {
+  if (!a_ || !b_) return 0;
+  const a = normalizeFuzzy(a_);
+  const b = normalizeFuzzy(b_);
+
+  const bigrams = new Map<string, number>();
+  for (let i = 0; i < a.length - 1; i++) {
+    const bg = a.slice(i, i + 2);
+    bigrams.set(bg, (bigrams.get(bg) || 0) + 1);
+  }
+
+  let intersection = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    const bg = b.slice(i, i + 2);
+    const cnt = bigrams.get(bg) || 0;
+    if (cnt > 0) {
+      bigrams.set(bg, cnt - 1);
+      intersection++;
+    }
+  }
+
+  return (2 * intersection) / (a.length + b.length - 2 || 1);
+}
+
+function synonymScore(query: string, name: string): number {
+  if (name.length < 3 || query.length < 3) return 0;
+
+  const SIMILARITY_THRESHOLD = 0.35;
+
+  if (name.includes(query)) return 10;
+  if (query.includes(name)) return 8;
+
+  if (cjkSimilarity(query, name) >= SIMILARITY_THRESHOLD) return 6;
+
+  const qChars = normalizeFuzzy(query).split('');
+  const nChars = normalizeFuzzy(name).split('');
+  let matchCount = 0;
+  const used = new Set<number>();
+  for (const qc of qChars) {
+    const allowed = CYRILLIC_ALIKE[qc] || qc;
+    for (let j = 0; j < nChars.length; j++) {
+      if (used.has(j)) continue;
+      if (allowed.includes(nChars[j])) {
+        used.add(j);
+        matchCount++;
+        break;
+      }
+    }
+  }
+  const overlapRatio = matchCount / Math.max(qChars.length, nChars.length);
+  return overlapRatio >= 0.7 ? 4 : 0;
+}
+
 export const medicinesComposer = new Composer<BotContext>();
 
 medicinesComposer.hears('💊 Справочник лекарств', async (ctx) => {
@@ -53,15 +121,16 @@ async function renderMedicines(ctx: BotContext, medicines: { name: string; dosag
 }
 
 async function fuzzySearch(prefix: string) {
-  const tokens = prefix.toLowerCase().split(/\s+/);
+  const tokens = normalizeFuzzy(prefix).split(/\s+/);
   const all = await prisma.medicine.findMany({ orderBy: { name: 'asc' } });
   return all.map(m => {
-    const name = m.name.toLowerCase();
+    const name = normalizeFuzzy(m.name);
     let score = 0;
     for (const t of tokens) {
-      if (name.includes(t)) score += 10;
-      if (name.startsWith(t)) score += 5;
-      if (m.activeIngredient?.toLowerCase().includes(t)) score += 3;
+      if (name.includes(t)) score += 12;
+      if (name.startsWith(t)) score += 6;
+      if (m.activeIngredient && normalizeFuzzy(m.activeIngredient).includes(t)) score += 4;
+      score += synonymScore(t, name);
     }
     return { medicine: m, score };
   }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
