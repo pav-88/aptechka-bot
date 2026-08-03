@@ -4,6 +4,7 @@ export interface SessionData {
   familyMemberId?: number;
   awaitingInput?: string;
   tempData?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export type BotContext = Context & SessionFlavor<SessionData>;
