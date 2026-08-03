@@ -32,15 +32,8 @@ export function prismaSessionAdapter<S extends Record<string, unknown>>() {
       const serialized = JSON.stringify(data);
 
       try {
-        const match = key.match(/^grammy:session:(\d+):(\d+)$/);
-        if (!match) {
-          logger.warn('Session', `Invalid session key format: ${key}`);
-          return;
-        }
-        const telegramId = match[1];
-
         const user = await prisma.user.findUnique({
-          where: { telegramId },
+          where: { telegramId: key },
         });
         if (!user) {
           logger.debug('Session', `User not found for session key ${key}, creating placeholder`);

@@ -116,8 +116,8 @@ export async function createBot(): Promise<Bot<BotContext>> {
 }
 
 async function checkTelegramApi(): Promise<void> {
-  const url = 'https://api.telegram.org/bot' + config.botToken.split(':')[0] + '/getMe';
-  logger.info('Bot', 'Checking Telegram API connectivity...', { url: url.substring(0, 50) + '...' });
+  const url = `https://api.telegram.org/bot${config.botToken}/getMe`;
+  logger.info('Bot', 'Checking Telegram API connectivity...');
 
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), 10_000);
