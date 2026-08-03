@@ -13,6 +13,8 @@ import { registerFamilyHandlers } from '../features/family/handlers';
 import { registerAnalyticsHandlers } from '../features/analytics/handlers';
 import { registerFirstAidHandlers } from '../features/firstaid/handlers';
 import { startReminderChecker } from '../shared/reminder-checker';
+import { rateLimit, RATE_LIMIT_MESSAGE } from '../shared/rate-limit';
+import { validateConfig } from '../shared/security';
 
 const initialSessionData: SessionData = {
   awaitingInput: undefined,
@@ -21,11 +23,31 @@ const initialSessionData: SessionData = {
 };
 
 export async function createBot(): Promise<Bot<BotContext>> {
+  const validation = validateConfig();
+  if (!validation.valid) {
+    console.error('[SECURITY] Configuration validation failed:');
+    validation.errors.forEach((e) => console.error(`  ❌ ${e}`));
+    throw new Error(`Config validation failed: ${validation.errors.join('; ')}`);
+  }
+  if (validation.warnings.length > 0) {
+    validation.warnings.forEach((w) => console.warn(`  ⚠️ ${w}`));
+  }
+
   await connectDatabase();
 
   const bot = new Bot<BotContext>(config.botToken);
 
   bot.use(session({ initial: () => ({ ...initialSessionData }) }));
+
+  bot.use(async (ctx, next) => {
+    if (!rateLimit(ctx)) {
+      await ctx.reply(RATE_LIMIT_MESSAGE);
+      const userId = ctx.from?.id;
+      console.warn(`[SECURITY] Rate limit hit: user ${userId || 'unknown'}, chat ${ctx.chat?.id || 'unknown'}`);
+      return;
+    }
+    await next();
+  });
 
   bot.command('start', startHandler);
 
@@ -42,7 +64,7 @@ export async function createBot(): Promise<Bot<BotContext>> {
   startReminderChecker(bot);
 
   bot.catch((err) => {
-    console.error('Bot error:', err);
+    console.error('[BOT] Unhandled error:', err);
   });
 
   return bot;
@@ -53,22 +75,25 @@ export async function startBot(): Promise<void> {
     const bot = await createBot();
     await bot.start({
       onStart: ({ username }) => {
-        console.log(`Bot @${username} is running...`);
+        console.log(`[APTHECKA] Bot @${username} is running...`);
+        console.log('[APTHECKA] Security: rate limiter active (20 req/min per user)');
       },
     });
   } catch (error) {
-    console.error('Failed to start bot:', error);
+    console.error('[APTHECKA] Failed to start bot:', error);
     await disconnectDatabase();
     process.exit(1);
   }
 }
 
 process.once('SIGINT', async () => {
+  console.log('[APTHECKA] Shutting down...');
   await disconnectDatabase();
   process.exit(0);
 });
 
 process.once('SIGTERM', async () => {
+  console.log('[APTHECKA] Shutting down...');
   await disconnectDatabase();
   process.exit(0);
 });

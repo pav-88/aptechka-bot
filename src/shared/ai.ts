@@ -13,6 +13,8 @@ function getClient(): OpenAI {
     aiClient = new OpenAI({
       baseURL: DEEPSEEK_BASE_URL,
       apiKey: config.deepseekApiKey,
+      timeout: 10_000,
+      maxRetries: 0,
     });
   }
   return aiClient;
