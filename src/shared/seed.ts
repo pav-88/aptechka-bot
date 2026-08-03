@@ -50,24 +50,13 @@ export async function seedMedicineCatalog(): Promise<void> {
     return;
   }
 
-  logger.info('Seed', `Medicine catalog: ${count} records, need ${ALL_MEDICINES.length} — re-seeding`);
+  logger.info('Seed', `Medicine catalog: ${count} records, need ${ALL_MEDICINES.length} — deleting all and re-seeding`);
+
+  await prisma.medicine.deleteMany();
 
   for (const m of ALL_MEDICINES) {
-    await prisma.medicine.upsert({
-      where: { name: m.name },
-      update: m,
-      create: m,
-    });
+    await prisma.medicine.create({ data: m });
   }
 
-  const orphans = await prisma.medicine.findMany({
-    where: { name: { notIn: ALL_MEDICINES.map(x => x.name) } },
-  });
-  if (orphans.length > 0) {
-    await prisma.medicine.deleteMany({
-      where: { name: { in: orphans.map(x => x.name) } },
-    });
-  }
-
-  logger.info('Seed', `Seeded ${ALL_MEDICINES.length} medicines (removed ${orphans.length} orphans)`);
+  logger.info('Seed', `Seeded ${ALL_MEDICINES.length} medicines`);
 }
