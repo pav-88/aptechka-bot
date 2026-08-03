@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { Bot } from 'grammy';
 import type { BotContext } from './types';
 import { prisma } from './database';
+import { logger } from './logger';
 
 async function sendToAllLinked(
   bot: Bot<BotContext>,
@@ -12,18 +13,14 @@ async function sendToAllLinked(
   const sent = new Set<string>();
   await sendToUser(bot, telegramId, message, replyMarkup, sent);
 
-  const linkedMembers = await prisma.familyMember.findMany({
-    where: {
-      linkedTelegramIds: { contains: telegramId },
-    },
+  const linkedAccounts = await prisma.familyMemberLinkedAccount.findMany({
+    where: { telegramId },
+    include: { familyMember: { include: { linkedAccounts: true } } },
   });
 
-  for (const member of linkedMembers) {
-    if (member.linkedTelegramIds) {
-      const ids = member.linkedTelegramIds.split(',').filter(Boolean);
-      for (const tid of ids) {
-        await sendToUser(bot, tid, message, replyMarkup, sent);
-      }
+  for (const account of linkedAccounts) {
+    for (const linked of account.familyMember.linkedAccounts) {
+      await sendToUser(bot, linked.telegramId, message, replyMarkup, sent);
     }
   }
 }
@@ -39,22 +36,35 @@ async function sendToUser(
   sent?.add(telegramId);
 
   try {
-    await bot.api.sendMessage(
-      parseInt(telegramId, 10),
-      message,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: replyMarkup as never,
-      },
-    );
+    await bot.api.sendMessage(parseInt(telegramId, 10), message, {
+      parse_mode: 'Markdown',
+      reply_markup: replyMarkup as never,
+    });
   } catch (err) {
-    console.error(`Failed to send to user ${telegramId}:`, err);
+    logger.error('Reminder', `Failed to send to user ${telegramId}`, { error: String(err) });
+  }
+}
+
+async function cleanupExpiredInviteCodes(): Promise<void> {
+  try {
+    const result = await prisma.inviteCode.deleteMany({
+      where: {
+        usedAt: null,
+        expiresAt: { lt: new Date() },
+      },
+    });
+    if (result.count > 0) {
+      logger.info('Reminder', `Cleaned up ${result.count} expired invite codes`);
+    }
+  } catch (err) {
+    logger.error('Reminder', 'Failed to cleanup expired invite codes', { error: String(err) });
   }
 }
 
 export function startReminderChecker(bot: Bot<BotContext>): void {
   cron.schedule('0 9 * * *', async () => {
-    console.log('[REMINDER] Running daily check...');
+    logger.info('Reminder', 'Running daily check');
+
     const now = new Date();
     const threeDays = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
@@ -93,13 +103,8 @@ export function startReminderChecker(bot: Bot<BotContext>): void {
     }
 
     const lowStock = await prisma.userMedicine.findMany({
-      where: {
-        quantity: { lte: 3, gt: 0 },
-      },
-      include: {
-        user: true,
-        medicine: true,
-      },
+      where: { quantity: { lte: 3, gt: 0 } },
+      include: { user: true, medicine: true },
     });
 
     for (const um of lowStock) {
@@ -122,5 +127,7 @@ export function startReminderChecker(bot: Bot<BotContext>): void {
 
       await sendToAllLinked(bot, um.user.telegramId, message, replyMarkup);
     }
+
+    await cleanupExpiredInviteCodes();
   });
 }

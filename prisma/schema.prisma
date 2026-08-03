@@ -20,36 +20,63 @@ model User {
   medicines     UserMedicine[]
   reminders     Reminder[]
   prescriptions Prescription[]
+  sessions      Session[]
 }
 
 model FamilyMember {
-  id            Int      @id @default(autoincrement())
-  userId        Int
-  name          String
-  gender        String
-  birthDate     DateTime
-  relation      String
-  linkedTelegramIds String? @default("")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  name      String
+  gender    String
+  birthDate DateTime
+  relation  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reminders    Reminder[]
-  prescriptions Prescription[]
+  user           User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminders      Reminder[]
+  prescriptions  Prescription[]
+  linkedAccounts FamilyMemberLinkedAccount[]
+  inviteCodes    InviteCode[]
 
   @@unique([userId, name])
 }
 
-model Medicine {
+model FamilyMemberLinkedAccount {
   id             Int      @id @default(autoincrement())
-  name           String   @unique
-  description    String?
-  dosage         String?
-  activeIngredient String?
-  category       String?
-  instructions   String?
+  familyMemberId Int
+  telegramId     String
   createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+
+  familyMember FamilyMember @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([familyMemberId, telegramId])
+  @@index([telegramId])
+}
+
+model InviteCode {
+  id             Int       @id @default(autoincrement())
+  code           String    @unique
+  familyMemberId Int
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  usedAt         DateTime?
+
+  familyMember FamilyMember @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+
+  @@index([code])
+}
+
+model Medicine {
+  id               Int                     @id @default(autoincrement())
+  name             String                  @unique
+  description      String?
+  dosage           String?
+  activeIngredient String?
+  category         String?
+  instructions     String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
   userMedicines    UserMedicine[]
   reminders        Reminder[]
@@ -136,4 +163,18 @@ model PrescriptionItem {
   medicine     Medicine?    @relation(fields: [medicineId], references: [id])
 
   @@index([prescriptionId])
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  key       String   @unique
+  data      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([key])
+  @@index([userId])
 }

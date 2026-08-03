@@ -1,4 +1,5 @@
 import type { BotContext } from './types';
+import { logger } from './logger';
 
 interface RateLimitEntry {
   count: number;
@@ -24,7 +25,7 @@ export function rateLimit(ctx: BotContext): boolean {
   entry.count++;
 
   if (entry.count > MAX_REQUESTS) {
-    console.warn(`[SECURITY] Rate limit exceeded for user ${userId} (${entry.count} requests)`);
+    logger.warn('RateLimit', `Exceeded for user ${userId}`, { count: entry.count });
     return false;
   }
 
@@ -33,6 +34,22 @@ export function rateLimit(ctx: BotContext): boolean {
 
 export function clearRateLimit(userId: number): void {
   store.delete(userId);
+}
+
+export function startRateLimitCleanup(intervalMs = 300_000): void {
+  setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [userId, entry] of store) {
+      if (now > entry.resetAt) {
+        store.delete(userId);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      logger.info('RateLimit', `Cleaned ${cleaned} expired entries`, { remaining: store.size });
+    }
+  }, intervalMs);
 }
 
 export const RATE_LIMIT_MESSAGE = '⚠️ Слишком много запросов. Пожалуйста, подождите минуту.';

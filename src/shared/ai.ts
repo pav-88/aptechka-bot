@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { config } from '../config';
+import { logger } from './logger';
 
 let aiClient: OpenAI | null = null;
 
@@ -39,149 +40,185 @@ export interface PrescriptionParseResult {
   }>;
 }
 
+async function safeJsonParse<T>(text: string, fallback: T): Promise<T> {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    logger.warn('AI', 'Failed to parse AI response JSON', { text: text.slice(0, 200) });
+    return fallback;
+  }
+}
+
+async function withErrorHandling<T>(fn: () => Promise<T>, fallback: T, operation: string): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    logger.error('AI', `Operation failed: ${operation}`, { error: err instanceof Error ? err.message : String(err) });
+    return fallback;
+  }
+}
+
 export async function recognizeMedicineFromPhoto(
   imageBase64: string,
   mimeType: string,
 ): Promise<MedicineOCRResult> {
-  const client = getClient();
+  return withErrorHandling(async () => {
+    const client = getClient();
 
-  const response = await client.chat.completions.create({
-    model: 'deepseek-chat',
-    messages: [
-      {
-        role: 'system',
-        content: 'Ты — ассистент для распознавания лекарств. '
-          + 'По фотографии упаковки лекарства определи: '
-          + 'название, срок годности (формат ДД.ММ.ГГГГ), количество, дозировку, действующее вещество. '
-          + 'Верни ТОЛЬКО JSON без пояснений.',
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Что это за лекарство? Распознай все данные.' },
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mimeType};base64,${imageBase64}` },
-          },
-        ],
-      },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 500,
-  });
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: 'Ты — ассистент для распознавания лекарств. '
+            + 'По фотографии упаковки лекарства определи: '
+            + 'название, срок годности (формат ДД.ММ.ГГГГ), количество, дозировку, действующее вещество. '
+            + 'Верни ТОЛЬКО JSON без пояснений.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Что это за лекарство? Распознай все данные.' },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 500,
+    });
 
-  const text = response.choices[0]?.message?.content || '{}';
-  const data = JSON.parse(text);
+    const text = response.choices[0]?.message?.content || '{}';
+    const data = await safeJsonParse<Record<string, unknown>>(text, {});
 
-  return {
-    name: data.name || 'Неизвестно',
-    expiryDate: data.expiry_date || data.expiryDate || null,
-    quantity: data.quantity || null,
-    dosage: data.dosage || null,
-    activeIngredient: data.active_ingredient || data.activeIngredient || null,
-    confidence: data.confidence || 'low',
-  };
+    return {
+      name: typeof data.name === 'string' ? data.name : 'Неизвестно',
+      expiryDate: typeof data.expiry_date === 'string' ? data.expiry_date : (typeof data.expiryDate === 'string' ? data.expiryDate : null),
+      quantity: typeof data.quantity === 'number' ? data.quantity : null,
+      dosage: typeof data.dosage === 'string' ? data.dosage : null,
+      activeIngredient: typeof data.active_ingredient === 'string' ? data.active_ingredient : (typeof data.activeIngredient === 'string' ? data.activeIngredient : null),
+      confidence: ['high', 'medium', 'low'].includes(String(data.confidence)) ? data.confidence as 'high' | 'medium' | 'low' : 'low',
+    };
+  }, {
+    name: 'Неизвестно',
+    expiryDate: null,
+    quantity: null,
+    dosage: null,
+    activeIngredient: null,
+    confidence: 'low' as const,
+  }, 'recognizeMedicineFromPhoto');
 }
 
 export async function parsePrescriptionFromPhoto(
   imageBase64: string,
   mimeType: string,
 ): Promise<PrescriptionParseResult> {
-  const client = getClient();
+  return withErrorHandling(async () => {
+    const client = getClient();
 
-  const response = await client.chat.completions.create({
-    model: 'deepseek-chat',
-    messages: [
-      {
-        role: 'system',
-        content: 'Ты — ассистент для разбора медицинских назначений и рецептов. '
-          + 'По фотографии или тексту назначения определи: '
-          + 'диагноз, список лекарств (название, дозировка, длительность, примечания). '
-          + 'Верни ТОЛЬКО JSON без пояснений.',
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Разбери это назначение врача.' },
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mimeType};base64,${imageBase64}` },
-          },
-        ],
-      },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 1000,
-  });
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: 'Ты — ассистент для разбора медицинских назначений и рецептов. '
+            + 'По фотографии или тексту назначения определи: '
+            + 'диагноз, список лекарств (название, дозировка, длительность, примечания). '
+            + 'Верни ТОЛЬКО JSON без пояснений.',
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Разбери это назначение врача.' },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 1000,
+    });
 
-  const text = response.choices[0]?.message?.content || '{}';
-  const data = JSON.parse(text);
+    const text = response.choices[0]?.message?.content || '{}';
+    const data = await safeJsonParse<Record<string, unknown>>(text, {});
 
-  return {
-    diagnosis: data.diagnosis || null,
-    medicines: (data.medicines || data.medications || []).map((m: { name?: string; dosage?: string; duration?: string; notes?: string; }) => ({
-      name: m.name || 'Неизвестно',
-      dosage: m.dosage || null,
-      duration: m.duration || null,
-      notes: m.notes || null,
-    })),
-  };
+    const medicines = Array.isArray(data.medicines) ? data.medicines : (Array.isArray(data.medications) ? data.medications : []);
+
+    return {
+      diagnosis: typeof data.diagnosis === 'string' ? data.diagnosis : null,
+      medicines: medicines.map((m: Record<string, unknown>) => ({
+        name: typeof m.name === 'string' ? m.name : 'Неизвестно',
+        dosage: typeof m.dosage === 'string' ? m.dosage : null,
+        duration: typeof m.duration === 'string' ? m.duration : null,
+        notes: typeof m.notes === 'string' ? m.notes : null,
+      })),
+    };
+  }, { diagnosis: null, medicines: [] }, 'parsePrescriptionFromPhoto');
 }
 
 export async function suggestAnalogues(
   medicineName: string,
   activeIngredient: string | null,
 ): Promise<string[]> {
-  const client = getClient();
+  return withErrorHandling(async () => {
+    const client = getClient();
 
-  const response = await client.chat.completions.create({
-    model: 'deepseek-chat',
-    messages: [
-      {
-        role: 'system',
-        content: 'Ты — фармацевтический консультант. '
-          + 'По названию лекарства или действующему веществу предложи до 3 аналогов. '
-          + 'Учитывай действующее вещество. '
-          + 'Верни ТОЛЬКО массив названий в JSON: {"analogues": ["..."]}',
-      },
-      {
-        role: 'user',
-        content: `Найди аналоги для: ${medicineName}${activeIngredient ? ` (действующее вещество: ${activeIngredient})` : ''}`,
-      },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 300,
-  });
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: 'Ты — фармацевтический консультант. '
+            + 'По названию лекарства или действующему веществу предложи до 3 аналогов. '
+            + 'Учитывай действующее вещество. '
+            + 'Верни ТОЛЬКО массив названий в JSON: {"analogues": ["..."]}',
+        },
+        {
+          role: 'user',
+          content: `Найди аналоги для: ${medicineName}${activeIngredient ? ` (действующее вещество: ${activeIngredient})` : ''}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 300,
+    });
 
-  const text = response.choices[0]?.message?.content || '{}';
-  const data = JSON.parse(text);
-  return data.analogues || data.analogs || [];
+    const text = response.choices[0]?.message?.content || '{}';
+    const data = await safeJsonParse<Record<string, unknown>>(text, {});
+    const analogues = Array.isArray(data.analogues) ? data.analogues : (Array.isArray(data.analogs) ? data.analogs : []);
+    return analogues.map(String);
+  }, [], 'suggestAnalogues');
 }
 
 export async function checkDrugInteraction(
   medicines: string[],
 ): Promise<string | null> {
-  const client = getClient();
+  return withErrorHandling(async () => {
+    const client = getClient();
 
-  const response = await client.chat.completions.create({
-    model: 'deepseek-chat',
-    messages: [
-      {
-        role: 'system',
-        content: 'Ты — фармацевтический консультант. '
-          + 'Проверь список лекарств на нежелательные взаимодействия. '
-          + 'Ссылайся на рекомендации ВОЗ и клинические исследования. '
-          + 'Если всё безопасно — напиши "Совместимость не вызывает опасений." '
-          + 'Если есть риски — опиши их конкретно. '
-          + '⚠️ Важно: ты даёшь справочную информацию, окончательное решение за врачом.',
-      },
-      {
-        role: 'user',
-        content: `Проверь совместимость: ${medicines.join(', ')}`,
-      },
-    ],
-    max_tokens: 500,
-  });
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: 'Ты — фармацевтический консультант. '
+            + 'Проверь список лекарств на нежелательные взаимодействия. '
+            + 'Ссылайся на рекомендации ВОЗ и клинические исследования. '
+            + 'Если всё безопасно — напиши "Совместимость не вызывает опасений." '
+            + 'Если есть риски — опиши их конкретно. '
+            + '⚠️ Важно: ты даёшь справочную информацию, окончательное решение за врачом.',
+        },
+        {
+          role: 'user',
+          content: `Проверь совместимость: ${medicines.join(', ')}`,
+        },
+      ],
+      max_tokens: 500,
+    });
 
-  return response.choices[0]?.message?.content || null;
+    return response.choices[0]?.message?.content || null;
+  }, null, 'checkDrugInteraction');
 }

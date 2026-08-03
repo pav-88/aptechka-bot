@@ -1,12 +1,28 @@
 import dotenv from 'dotenv';
+import { z } from 'zod';
+
 dotenv.config();
 
-export const config = {
-  botToken: process.env.BOT_TOKEN || '',
-  databaseUrl: process.env.DATABASE_URL || 'file:./dev.db',
-  deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
-} as const;
+const envSchema = z.object({
+  BOT_TOKEN: z.string().min(1, 'BOT_TOKEN is required'),
+  DATABASE_URL: z.string().default('file:./dev.db'),
+  DEEPSEEK_API_KEY: z.string().optional(),
+  LOG_LEVEL: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).optional().default('INFO'),
+});
 
-if (!config.botToken) {
-  throw new Error('BOT_TOKEN is not set in environment variables');
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error('[CONFIG] Environment validation failed:');
+  for (const issue of parsed.error.issues) {
+    console.error(`  ❌ ${issue.path.join('.')}: ${issue.message}`);
+  }
+  process.exit(1);
 }
+
+export const config = {
+  botToken: parsed.data.BOT_TOKEN,
+  databaseUrl: parsed.data.DATABASE_URL,
+  deepseekApiKey: parsed.data.DEEPSEEK_API_KEY || '',
+  logLevel: parsed.data.LOG_LEVEL,
+} as const;
