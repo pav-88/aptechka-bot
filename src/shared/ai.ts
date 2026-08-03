@@ -222,3 +222,30 @@ export async function checkDrugInteraction(
     return response.choices[0]?.message?.content || null;
   }, null, 'checkDrugInteraction');
 }
+
+export async function getMedicineDescription(
+  medicineName: string,
+): Promise<string | null> {
+  return withErrorHandling(async () => {
+    const client = getClient();
+
+    const response = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: 'Ты — фармацевтический справочник. '
+            + 'По названию лекарства кратко опиши: для чего применяется, как принимать, основные противопоказания. '
+            + 'Ответ дай на русском, 3-5 предложений. Без форматирования JSON, просто текст.',
+        },
+        {
+          role: 'user',
+          content: `Расскажи о лекарстве: ${medicineName}`,
+        },
+      ],
+      max_tokens: 500,
+    });
+
+    return response.choices[0]?.message?.content || null;
+  }, null, 'getMedicineDescription');
+}
