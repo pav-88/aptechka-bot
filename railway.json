@@ -5,7 +5,7 @@
     "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "npx prisma generate && npx prisma db push && node dist/index.js",
+    "startCommand": "npx prisma generate && npx prisma db push --accept-data-loss --force-reset && node dist/index.js",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5
   }
