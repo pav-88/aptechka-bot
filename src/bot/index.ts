@@ -118,11 +118,19 @@ export async function createBot(): Promise<Bot<BotContext>> {
 export async function startBot(): Promise<void> {
   try {
     const bot = await createBot();
-    await bot.start({
+    logger.info('Bot', 'Calling bot.start() — connecting to Telegram API...');
+
+    const startPromise = bot.start({
       onStart: ({ username }) => {
         logger.info('Bot', `Bot @${username} is running`, { mode: 'polling', rateLimit: '20 req/min per user', session: 'persistent (Prisma)' });
       },
     });
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('bot.start() timed out after 30s — cannot reach Telegram API')), 30_000),
+    );
+
+    await Promise.race([startPromise, timeout]);
   } catch (error) {
     logger.error('Bot', 'Failed to start bot', { error: String(error) });
     await disconnectDatabase();
