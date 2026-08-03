@@ -3,9 +3,13 @@ import { logger } from './logger';
 
 export async function seedMedicineCatalog(): Promise<void> {
   const count = await prisma.medicine.count();
-  if (count > 0) return;
 
-  logger.info('Seed', 'Medicine catalog is empty — seeding...');
+  if (count >= 40) {
+    logger.info('Seed', `Medicine catalog already has ${count} records — skipping.`);
+    return;
+  }
+
+  logger.info('Seed', `Medicine catalog: ${count} records found, need to re-seed (target: 40)...`);
 
   const medicines = [
     { name: 'Парацетамол', dosage: '500 мг', activeIngredient: 'Парацетамол', category: 'Жаропонижающие', description: 'Жаропонижающее и болеутоляющее' },
